@@ -1,0 +1,19 @@
+# Test
+sfix.set_precision(16, 64)
+
+# Build and import mimc
+
+# By default, sfix precision is 64 bits
+
+a = sfix(1239234)
+b = sfix(2823239)
+
+def test(actual, expected):
+
+    # you can reveal a number in order to print it
+
+    actual = actual.reveal()
+    print_ln('expected %s, got %s', expected, actual)
+
+test(a*b, 3498653758926)
+

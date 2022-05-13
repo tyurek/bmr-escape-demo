@@ -1,0 +1,228 @@
+# Build and import mimc
+sfix.set_precision(16, 64)
+
+a = sint(1239234)
+b = sint(2823239)
+
+def test(actual, expected):
+
+    # you can reveal a number in order to print it
+
+    actual = actual.reveal()
+    print_ln('expected %s, got %s', expected, actual)
+
+
+"""
+test(a < b, 1)
+
+key = sint.get_random_triple()[0]
+
+prf = MiMC(64, key, 2)
+b0 = prf.encrypt(0)
+b1 = prf.encrypt(1)
+
+print_ln('b0: %s', b0.reveal())
+print_ln('b1: %s', b1.reveal())
+"""
+
+def cond(bit_selector, val0, val1):
+    return (1-bit_selector)*val0 + (bit_selector)*val1
+
+@vectorize
+def dual_encrypt(k1, k2, m):
+    # Returns a pair of field elements as the ciphertext
+    c0 = mimc_prf(k1, 0) + mimc_prf(k2, 0)
+    c1 = mimc_prf(k1, 1) + mimc_prf(k2, 1) + m
+    return (c0, c1)
+
+@vectorize
+def mimc_prf(key, m):
+    x = m + key
+
+    for r in range(64):
+        x = x ** 3
+        x = x + key + 0 # self.constants[r]
+
+    x = x + key
+    return x
+
+@vectorize
+def XOR(a,b):
+    # Assume a,b are sint in 0,1
+    return a + b - 2*a*b
+
+@vectorize
+def AND(a,b):
+    return a*b
+
+@vectorize
+def COND(s,ifa,ifb,a=0,b=1):
+    return (s-b)/(a-b) * ifa + \
+           (s-a)/(b-a) * ifb
+
+
+def step1_garble_generator(circuit):
+    """
+    For each wire:
+    1. Sample a random wire mask bit
+    2. Sample a wire label
+
+    For each gate g with input wires a,b and output wire c
+       Enc()
+
+    """
+    labels0 = sint.Array(circuit.n_wires)
+    labels1 = sint.Array(circuit.n_wires)
+    maskbit = sint.Array(circuit.n_wires)
+    
+    is_inv = set()
+    inv_gates = []
+    and_gates = []
+    xor_gates = []
+    for g in circuit.gates:
+        if g[0] == 'INV':
+            is_inv.add(g[2])
+            inv_gates.append(g)
+        if g[0] == 'XOR':
+            xor_gates.append(g)
+        if g[0] == 'AND':
+            and_gates.append(g)
+
+    @for_range_opt(circuit.n_wires)
+    def _preplabels(w):
+        labels0[w] = sint.get_random()
+        labels1[w] = sint.get_random()
+        maskbit[w] = sint.get_random_bit()
+
+    inv_gates_src = regint.Array(len(inv_gates))
+    inv_gates_dst = regint.Array(len(inv_gates))
+    inv_gates_src[:] = [g[1] for g in inv_gates]
+    inv_gates_dst[:] = [g[2] for g in inv_gates]
+    @for_range_opt(len(inv_gates))
+    def _inv(i):
+        # For inv, copy the labels but flip the semantic bit
+        i = inv_gates_src[i]
+        o = inv_gates_dst[i]
+        labels0[o] = labels0[i]
+        labels1[o] = labels1[i]
+        maskbit[o] = 1 - maskbit[i]
+    
+    def prep_gates_vec(op, gates):
+        gates = gates.transpose()
+        ciph = sint.Matrix(8, len(gates[0]))
+        a = gates[0]
+        b = gates[1]
+        c = gates[2]
+
+        z00 = XOR( op( XOR(0,maskbit.get(a)), XOR(0, maskbit.get(b)) ), maskbit.get(c))
+        z01 = XOR( op( XOR(0,maskbit.get(a)), XOR(1, maskbit.get(b)) ), maskbit.get(c))
+        z10 = XOR( op( XOR(1,maskbit.get(a)), XOR(0, maskbit.get(b)) ), maskbit.get(c))
+        z11 = XOR( op( XOR(1,maskbit.get(a)), XOR(1, maskbit.get(b)) ), maskbit.get(c))
+        c00a,c00b = dual_encrypt(labels0.get(a), labels0.get(b), cond(z00, labels0.get(c), labels1.get(c)))
+        c01a,c01b = dual_encrypt(labels0.get(a), labels1.get(b), cond(z01, labels0.get(c), labels1.get(c)))
+        c10a,c10b = dual_encrypt(labels1.get(a), labels0.get(b), cond(z10, labels0.get(c), labels1.get(c)))
+        c11a,c11b = dual_encrypt(labels1.get(a), labels1.get(b), cond(z11, labels0.get(c), labels1.get(c)))
+
+        ciph[0][:] = c00a.reveal()
+        ciph[1][:] = c00b.reveal()
+        ciph[2][:] = c01a.reveal()
+        ciph[3][:] = c01b.reveal()
+        ciph[4][:] = c10a.reveal()
+        ciph[5][:] = c10b.reveal()
+        ciph[6][:] = c11a.reveal()
+        ciph[7][:] = c11b.reveal()
+        return ciph
+    
+    print('xor start', len(xor_gates))
+    xor_gates = regint.Matrix(len(xor_gates), 3)
+    for i,g in enumerate(xor_gates):
+        xor_gates[i][:] = g[1:]
+    xor_ciph = prep_gates_vec(XOR, xor_gates)
+    print('xor done')
+
+    print('and start', len(and_gates))
+    and_gates = regint.Matrix(len(and_gates), 3)
+    for i,g in enumerate(and_gates):
+        and_gates[i][:] = g[1:]
+    and_ciph = prep_gates_vec(AND, and_gates)
+    print('and done')
+
+    return circuit, and_ciph, xor_ciph, labels0, labels1, maskbit
+
+    
+from circuit_forbmr import Circuit
+import itertools
+sb128 = sbits.get_type(128)
+if 0:
+    key = sb128(0x2b7e151628aed2a6abf7158809cf4f3c)
+    plaintext = sb128(0x6bc1bee22e409f96e93d7e117393172a)
+    aes128 = Circuit('aes_128')
+    aes128.compile()
+
+    step1_garble_generator(aes128)
+if 0:
+    mult64 = Circuit('mult64')
+    mult64.compile()
+
+    step1_garble_generator(mult64)
+
+
+def map_wirelabel_inputs(inpwires, inp_sints, labels0, labels1, maskbit):
+    # For each input wire w, retrieve either label0[w] or label1[w], 
+    #  depending on inp_sint (and after correcting for maskbit).
+    # This could be called Oblivious Transfer
+    assert len(inpwires) == len(inp_sints)
+    inp_labels = sint.Array(len(inpwires))
+    @for_range_opt(len(inpwires))
+    def _loop(i):
+        w = inpwires[i]
+        inp_labels[i] = COND(XOR(inp_sints[i], maskbit[w]), labels0[w], labels1[w])
+    return inp_labels.reveal()
+
+def map_wirelabel_outputs(outwires, out_labels, labels0, labels1, maskbit):
+    # For each input wire w, retrieve either label0[w] or label1[w], 
+    #  depending on inp_sint (and after correcting for maskbit)
+    assert len(outwires) == len(out_labels)
+    out_values = sint.Array(len(outwires))
+    _outwires = cint.Array(len(outwires))
+    _outwires[:] = outwires
+    @for_range_opt(len(outwires))
+    def _loop(i):
+        w = _outwires[i]
+        out_values[i] = COND(out_labels[i], 0, 1, a=labels0[w], b=labels1[w])
+    return out_values.reveal()
+
+try:
+    mult64 = Circuit('mult64')
+    mult64.compile()
+except FileNotFoundError:
+    print('The mult64.txt circuit was not found. Try:')
+    print(' wget https://homes.esat.kuleuven.be/~nsmart/MPC/mult64.txt -O Programs/Circuits/mult64.txt')
+    raise
+    
+if 1:
+    # Phase 1: Garbling
+    _, _, _, labels0, labels1, maskbit = step1_garble_generator(mult64)
+
+if 1:
+    # Phase 2: Input wire label mapping
+    inp_sints = sint.Array(sum(mult64.n_input_wires))
+    inp_sints[:] = [sint(1) for _ in range(len(inp_sints))]
+    inpwires = cint.Array(sum(mult64.n_input_wires))
+    inpwires[:] = range(128)
+    inp_labels = map_wirelabel_inputs(inpwires, inp_sints, labels0, labels1, maskbit)
+
+    # Not pictured: evaluating the garbled circuit ciphertexts locally
+if 1:
+    # Phase 3: Output wirelabel mapping
+    outwires = cint.Array(sum(mult64.n_output_wires))
+    outwires[:] = range(len(inpwires),len(inpwires)+len(outwires))    
+    out_labels = sint.Array(sum(mult64.n_output_wires))
+    out_labels[:] = [labels0[i] for i in range(len(inpwires),len(inpwires)+len(outwires))]
+    out_values = map_wirelabel_outputs(outwires, out_labels, labels0, labels1, maskbit)
+
+    
+
+
+# ciphertexts = aes128(sbitvec([key] * n), sbitvec([plaintext] * n))
+# ciphertexts.elements()[n - 1].reveal().print_reg()
