@@ -12,6 +12,7 @@ class Circuit:
         self.n_wires = n_wires
         input_line = [int(x) for x in next_line()]
         n_inputs = input_line[0]
+        self.n_inputs = n_inputs
         n_input_wires = input_line[1:]
         self.n_input_wires = n_input_wires
         assert(n_inputs == len(n_input_wires))
@@ -21,6 +22,7 @@ class Circuit:
             s += n
         output_line = [int(x) for x in next_line()]
         n_outputs = output_line[0]
+        self.n_outputs = n_outputs
         self.n_output_wires = output_line[1:]
         assert(n_outputs == len(self.n_output_wires))
         next(lines)

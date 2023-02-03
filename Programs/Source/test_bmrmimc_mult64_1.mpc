@@ -34,6 +34,37 @@ def dual_encrypt(k1, k2, m):
     c0 = mimc_prf(k1, 0) + mimc_prf(k2, 0)
     c1 = mimc_prf(k1, 1) + mimc_prf(k2, 1) + m
     return (c0, c1)
+'''
+def dual_decrypt(k1, k2, c0, c1):
+    new_c0 = mimc_prf(k1, 0) + mimc_prf(k2, 0)
+    new_c1 = mimc_prf(k1, 1) + mimc_prf(k2, 1)
+    return (c0 == new_c0, c1 - new_c1)
+
+def decrypt_gate(ciphs, label0, label1):
+    out = cint(0)
+    for ciph in (ciphs[0:2], ciphs[2:4], ciphs[4:6], ciphs[6:8]):
+        #todo: find a way to abort if none of the decryptions are good
+        res = dual_decrypt(label0, label1, ciph[0], ciph[1])
+        out += res[0] * res[1]
+    return out
+'''
+
+'''
+@vectorize
+def mimc_prf(key, m):
+    x = MemValue(m + key)
+
+    for r in range(64):
+    # for some reason, this opt would greatly increase round total (as does using a MemValue)
+    #@for_range(64)
+    #def _(i):
+        x.write(x** 3)
+        x.write(x + key + 0) # self.constants[r]
+
+    #x = x + key
+    x.write(x+key)
+    return x.read()
+'''
 
 @vectorize
 def mimc_prf(key, m):
@@ -101,19 +132,27 @@ def step1_garble_generator(circuit):
     @for_range_opt(len(inv_gates))
     def _inv(i):
         # For inv, copy the labels but flip the semantic bit
-        i = inv_gates_src[i]
-        o = inv_gates_dst[i]
-        labels0[o] = labels0[i]
-        labels1[o] = labels1[i]
-        maskbit[o] = 1 - maskbit[i]
+        inp = inv_gates_src[i]
+        out = inv_gates_dst[i] #it's me. I'm the issue
+        labels0[out] = labels0[inp]
+        labels1[out] = labels1[inp]
+        maskbit[out] = 1 - maskbit[inp]
     
     def prep_gates_vec(op, gates):
+        #print_ln('gates is %s.', gates.reveal())
         gates = gates.transpose()
-        ciph = sint.Matrix(8, len(gates[0]))
+        #print_ln('gates_transpose is %s.', gates.reveal())
+        #tom: chaned this to cint, since these are revealed values
+        ciph = cint.Matrix(8, len(gates[0]))
         a = gates[0]
         b = gates[1]
         c = gates[2]
 
+        print_ln('line 121')
+        #print_ln('a is %s.', a.reveal())
+        #print_ln('b is %s.', b.reveal())
+        #print_ln('labels0.get(a) is %s.', labels0.get(a).reveal())
+        
         z00 = XOR( op( XOR(0,maskbit.get(a)), XOR(0, maskbit.get(b)) ), maskbit.get(c))
         z01 = XOR( op( XOR(0,maskbit.get(a)), XOR(1, maskbit.get(b)) ), maskbit.get(c))
         z10 = XOR( op( XOR(1,maskbit.get(a)), XOR(0, maskbit.get(b)) ), maskbit.get(c))
@@ -122,7 +161,11 @@ def step1_garble_generator(circuit):
         c01a,c01b = dual_encrypt(labels0.get(a), labels1.get(b), cond(z01, labels0.get(c), labels1.get(c)))
         c10a,c10b = dual_encrypt(labels1.get(a), labels0.get(b), cond(z10, labels0.get(c), labels1.get(c)))
         c11a,c11b = dual_encrypt(labels1.get(a), labels1.get(b), cond(z11, labels0.get(c), labels1.get(c)))
-
+        
+        print('c00a', len(c00a))
+        #print('c00a[0]', len(c00a[0]))
+        #print('c00a[0][0]', len(c00a[0][0]))
+        #c00a is an array, just a bad one
         ciph[0][:] = c00a.reveal()
         ciph[1][:] = c00b.reveal()
         ciph[2][:] = c01a.reveal()
@@ -131,25 +174,64 @@ def step1_garble_generator(circuit):
         ciph[5][:] = c10b.reveal()
         ciph[6][:] = c11a.reveal()
         ciph[7][:] = c11b.reveal()
+        
+        #print_ln('c00a[0] is %s.', c00a[0].reveal())
+        #ciph[0].print_reveal_nested()
+        #ciph[1].print_reveal_nested()
+        #ciph[2].print_reveal_nested()
+
         return ciph
-    
+
+    #print_ln('line 141')
     print('xor start', len(xor_gates))
-    xor_gates = regint.Matrix(len(xor_gates), 3)
+    #print_ln('xor_gates[0] is %s.', xor_gates[0])
+    new_xor_gates = regint.Matrix(len(xor_gates), 3)
     for i,g in enumerate(xor_gates):
-        xor_gates[i][:] = g[1:]
-    xor_ciph = prep_gates_vec(XOR, xor_gates)
+        new_xor_gates[i][:] = g[1:]
+    xor_ciph = prep_gates_vec(XOR, new_xor_gates)
     print('xor done')
 
     print('and start', len(and_gates))
-    and_gates = regint.Matrix(len(and_gates), 3)
+    new_and_gates = regint.Matrix(len(and_gates), 3)
     for i,g in enumerate(and_gates):
-        and_gates[i][:] = g[1:]
-    and_ciph = prep_gates_vec(AND, and_gates)
+        new_and_gates[i][:] = g[1:]
+    and_ciph = prep_gates_vec(AND, new_and_gates)
     print('and done')
+    #print_ln(and_ciph[0].to_string())
 
     return circuit, and_ciph, xor_ciph, labels0, labels1, maskbit
 
-    
+'''
+def step2_local_eval(circuit, and_ciph, xor_ciph, input_labels):
+    label_dict = {}
+    for i, label in enumerate(input_labels):
+        label_dict[i] = label
+    #and_count, xor_count = MemValue(0), MemValue(0)
+    #and_count, xor_count = MemValue(cint(0)), MemValue(cint(0))
+    #and_count = MemValue(0)
+    #xor_count = MemValue(0)
+    and_count, xor_count = 0,0
+    for gate in circuit.gates:
+        print("and ", and_count, " xor ", xor_count, "type ", gate[0])
+        inp0 = label_dict[gate[1]]
+        inp1 = label_dict[gate[2]]
+        out_idx = gate[3]
+        if gate[0] == "AND":
+            #res = decrypt_gate([and_ciph[0][and_count.read()], and_ciph[1][and_count.read()], and_ciph[2][and_count.read()], and_ciph[3][and_count.read()], and_ciph[4][and_count.read()], and_ciph[5][and_count.read()], and_ciph[6][and_count.read()], and_ciph[7][and_count.read()]], inp0, inp1)
+            res = decrypt_gate([and_ciph[0][and_count], and_ciph[1][and_count], and_ciph[2][and_count], and_ciph[3][and_count], and_ciph[4][and_count], and_ciph[5][and_count], and_ciph[6][and_count], and_ciph[7][and_count]], inp0, inp1)
+            and_count += 1
+        if gate[0] == "XOR":
+            #res = decrypt_gate([xor_ciph[0][xor_count.read()], xor_ciph[1][xor_count.read()], xor_ciph[2][xor_count.read()], xor_ciph[3][xor_count.read()], xor_ciph[4][xor_count.read()], xor_ciph[5][xor_count.read()], xor_ciph[6][xor_count.read()], xor_ciph[7][xor_count.read()]], inp0, inp1)
+            res = decrypt_gate([xor_ciph[0][xor_count], xor_ciph[1][xor_count], xor_ciph[2][xor_count], xor_ciph[3][xor_count], xor_ciph[4][xor_count], xor_ciph[5][xor_count], xor_ciph[6][xor_count], xor_ciph[7][xor_count]], inp0, inp1)
+            xor_count += 1
+        label_dict[out_idx] = res
+    out_labels = []
+    start = circuit.n_wires - len(circuit.n_output_wires)
+    #for i in range(len(circuit.n_output_wires)):
+    #    out_labels.append(label_dict[i+start])
+    #return out_labels
+'''        
+
 from circuit_forbmr import Circuit
 import itertools
 sb128 = sbits.get_type(128)
@@ -193,7 +275,8 @@ def map_wirelabel_outputs(outwires, out_labels, labels0, labels1, maskbit):
     return out_values.reveal()
 
 try:
-    mult64 = Circuit('mult64')
+    mult64 = Circuit('program')
+    #mult64 = Circuit('aes_128')
     mult64.compile()
 except FileNotFoundError:
     print('The mult64.txt circuit was not found. Try:')
@@ -202,27 +285,14 @@ except FileNotFoundError:
     
 if 1:
     # Phase 1: Garbling
-    _, _, _, labels0, labels1, maskbit = step1_garble_generator(mult64)
+    circuit, and_ciph, xor_ciph, labels0, labels1, maskbit = step1_garble_generator(mult64)
 
-if 1:
-    # Phase 2: Input wire label mapping
-    inp_sints = sint.Array(sum(mult64.n_input_wires))
-    inp_sints[:] = [sint(1) for _ in range(len(inp_sints))]
-    inpwires = cint.Array(sum(mult64.n_input_wires))
-    inpwires[:] = range(128)
-    inp_labels = map_wirelabel_inputs(inpwires, inp_sints, labels0, labels1, maskbit)
-
-    # Not pictured: evaluating the garbled circuit ciphertexts locally
-if 1:
-    # Phase 3: Output wirelabel mapping
-    outwires = cint.Array(sum(mult64.n_output_wires))
-    outwires[:] = range(len(inpwires),len(inpwires)+len(outwires))    
-    out_labels = sint.Array(sum(mult64.n_output_wires))
-    out_labels[:] = [labels0[i] for i in range(len(inpwires),len(inpwires)+len(outwires))]
-    out_values = map_wirelabel_outputs(outwires, out_labels, labels0, labels1, maskbit)
-
-    
-
-
-# ciphertexts = aes128(sbitvec([key] * n), sbitvec([plaintext] * n))
-# ciphertexts.elements()[n - 1].reveal().print_reg()
+    #print_ln('maskbit')
+    #maskbit.print_reveal_nested()
+    print_ln('xor_ciph')
+    xor_ciph.print_reveal_nested()
+    print_ln('and_ciph')
+    and_ciph.print_reveal_nested()
+    sint.write_to_file(labels0)
+    sint.write_to_file(labels1)
+    sint.write_to_file(maskbit)

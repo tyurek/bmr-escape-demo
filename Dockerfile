@@ -107,7 +107,8 @@ RUN ./Scripts/setup-ssl.sh ${cryptoplayers} ${ssl_dir}
 ###############################################################################
 FROM buildenv as machine
 
-ARG machine="mascot-party.x"
+#ARG machine="mascot-party.x"
+ARG machine="malicious-shamir-party.x"
 
 ARG gfp_mod_sz=2
 

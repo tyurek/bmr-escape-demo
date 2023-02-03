@@ -1,12 +1,15 @@
 # Test
-sfix.set_precision(16, 64)
+#sfix.set_precision(16, 64)
+sfix.set_precision(16, 16 + 65)
 
 # Build and import mimc
 
 # By default, sfix precision is 64 bits
 
-a = sfix(1239234)
-b = sfix(2823239)
+#a = sfix(1239234)
+#b = sfix(2823239)
+a = sfix(11529215050359242752)
+b = sfix(13836184227919429632)
 
 def test(actual, expected):
 
@@ -16,4 +19,8 @@ def test(actual, expected):
     print_ln('expected %s, got %s', expected, actual)
 
 test(a*b, 3498653758926)
+c = a*b
+c = a*a*a*a*a*a*b*b*b*b*b*b*b*b
+print_ln("c: %s", c.reveal())
+print(type(c))
 

@@ -5200,7 +5200,7 @@ class Array(_vectorizable):
                                          (str(index), str(self.length)))
             elif self.check_indices and not isinstance(index, cbits):
                 library.runtime_error_if(regint.conv(index) >= self.length,
-                                         'overflow: %s/%s',
+                                         'overflow at 5203: %s/%s', #it's this one
                                          index, self.length)
         if (program.curr_block, key) not in self.address_cache:
             n = self.value_type.n_elements()
@@ -5618,7 +5618,7 @@ class SubMultiArray(_vectorizable):
                 raise CompilerError('index out of range')
             elif self.check_indices:
                 library.runtime_error_if(index >= self.sizes[0],
-                                         'overflow: %s/%s',
+                                         'overflow at 5621: %s/%s',
                                          index, self.sizes)
             if len(self.sizes) == 2:
                 self.sub_cache[key] = \

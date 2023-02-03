@@ -1,0 +1,80 @@
+@vectorize
+def XOR(a,b):
+    # Assume a,b are sint in 0,1
+    return a + b - 2*a*b
+
+@vectorize
+def AND(a,b):
+    return a*b
+
+@vectorize
+def COND(s,ifa,ifb,a=0,b=1):
+    return (s-b)/(a-b) * ifa + \
+           (s-a)/(b-a) * ifb
+
+from circuit_forbmr import Circuit
+import itertools
+
+
+def map_wirelabel_inputs(inpwires, inp_sints, labels0, labels1, maskbit):
+    # For each input wire w, retrieve either label0[w] or label1[w], 
+    #  depending on inp_sint (and after correcting for maskbit).
+    # This could be called Oblivious Transfer
+    assert len(inpwires) == len(inp_sints)
+    inp_labels = sint.Array(len(inpwires))
+    @for_range_opt(len(inpwires))
+    def _loop(i):
+        w = inpwires[i]
+        inp_labels[i] = COND(XOR(inp_sints[i], maskbit[w]), labels0[w], labels1[w])
+    return inp_labels.reveal()
+
+def map_wirelabel_outputs(outwires, out_labels, labels0, labels1, maskbit):
+    # For each input wire w, retrieve either label0[w] or label1[w], 
+    #  depending on inp_sint (and after correcting for maskbit)
+    assert len(outwires) == len(out_labels)
+    out_values = sint.Array(len(outwires))
+    _outwires = cint.Array(len(outwires))
+    _outwires[:] = outwires
+    @for_range_opt(len(outwires))
+    def _loop(i):
+        w = _outwires[i]
+        out_values[i] = XOR(maskbit[w], COND(out_labels[i], 0, 1, a=labels0[w], b=labels1[w]))
+    return out_values.reveal()
+
+try:
+    mult64 = Circuit('program')
+    mult64.compile()
+    circuit = mult64
+except FileNotFoundError:
+    print('The mult64.txt circuit was not found. Try:')
+    print(' wget https://homes.esat.kuleuven.be/~nsmart/MPC/mult64.txt -O Programs/Circuits/mult64.txt')
+    raise
+if 1:
+    # Phase 3: Output wirelabel mapping
+    outwires = cint.Array(sum(mult64.n_output_wires))
+    outwires[:] = range(mult64.n_wires - len(outwires), mult64.n_wires)
+    out_labels = sint.Array(sum(mult64.n_output_wires))
+    out_labels[:] = [public_input() for i in range(len(outwires))]
+
+    num_labels = circuit.n_wires
+    code1, labels0 = sint.read_from_file(regint(0), num_labels)
+    code2, labels1 = sint.read_from_file(regint(num_labels), num_labels)
+    code3, maskbit = sint.read_from_file(regint(num_labels+num_labels), num_labels)
+
+    #todo make this unnecessary
+    labels0 = Array.create_from(labels0)
+    labels1 = Array.create_from(labels1)
+    maskbit = Array.create_from(maskbit)
+
+    #print_ln('code1: %s', code1.reveal())
+    #print_ln('code2: %s', code2.reveal())
+    #print_ln('code3: %s', code3.reveal())
+
+    all_out_bits = map_wirelabel_outputs(outwires, out_labels, labels0, labels1, maskbit)
+    # assumes all outputs are the same size
+    output_size = len(all_out_bits) // circuit.n_outputs
+    outputs_bits = [all_out_bits[i*output_size:(i+1)*output_size] for i in range(circuit.n_outputs)]
+    outputs = [sint.bit_compose(outputs_bits[i]) for i in range(circuit.n_outputs)]
+    outputs_arr = Array.create_from(outputs)
+    print_ln("********Output on next line*********")
+    outputs_arr.print_reveal_nested()
