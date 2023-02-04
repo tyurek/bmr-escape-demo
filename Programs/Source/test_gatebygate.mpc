@@ -1,0 +1,47 @@
+# Test
+#sfix.set_precision(16, 64)
+#sfix.set_precision(16, 16 + 65)
+
+# Build and import mimc
+
+# By default, sfix precision is 64 bits
+
+#a = sfix(1239234)
+#b = sfix(2823239)
+
+'''
+amtA = sfix(5)
+amtB = sfix(-40)
+user_amtA = sfix(100)
+user_amtB = sfix(100)
+poolA = sfix(500)
+poolB = sfix(1000)
+'''
+amtA = sfix.get_input_from(0)
+amtB = sfix.get_input_from(0)
+user_amtA = sfix.get_input_from(1)
+user_amtB = sfix.get_input_from(1)
+poolA = sfix.get_input_from(1)
+poolB = sfix.get_input_from(1)
+
+validOrder = amtA * amtB < 0
+buyA = amtA > 0
+enoughB = -amtB  <= user_amtB
+actualAmtA = poolA  - poolA * poolB / (poolB  - amtB)
+acceptA = actualAmtA  >= amtA
+flagBuyA = validOrder * buyA * enoughB * acceptA
+buyB = 1 - buyA
+enoughA = -amtA  <= user_amtA
+actualAmtB = poolB  - poolA * poolB / (poolA  - amtA)
+acceptB = actualAmtB  >= amtB
+flagBuyB = validOrder * buyB * enoughA * acceptB
+changeA = flagBuyA * actualAmtA + flagBuyB * amtA
+changeB = flagBuyA * amtB + flagBuyB * actualAmtB
+poolA = poolA - changeA
+poolB = poolB - changeB
+user_amtA = user_amtA + changeA
+user_amtB = user_amtB + changeB
+print_ln("user_amtA: %s", user_amtA.reveal())
+print_ln("user_amtB: %s", user_amtB.reveal())
+print_ln("poolA: %s", poolA.reveal())
+print_ln("poolB: %s", poolB.reveal())
