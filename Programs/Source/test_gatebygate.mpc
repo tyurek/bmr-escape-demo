@@ -1,5 +1,5 @@
 # Test
-#sfix.set_precision(16, 64)
+sfix.set_precision(16, 64)
 #sfix.set_precision(16, 16 + 65)
 
 # Build and import mimc
@@ -17,6 +17,7 @@ user_amtB = sfix(100)
 poolA = sfix(500)
 poolB = sfix(1000)
 '''
+
 amtA = sfix.get_input_from(0)
 amtB = sfix.get_input_from(0)
 user_amtA = sfix.get_input_from(1)
@@ -45,3 +46,17 @@ print_ln("user_amtA: %s", user_amtA.reveal())
 print_ln("user_amtB: %s", user_amtB.reveal())
 print_ln("poolA: %s", poolA.reveal())
 print_ln("poolB: %s", poolB.reveal())
+
+'''
+a = sfix(1239234)
+b = sfix(2823239)
+
+def test(actual, expected):
+
+    # you can reveal a number in order to print it
+
+    actual = actual.reveal()
+    print_ln('expected %s, got %s', expected, actual)
+
+test(a*b, 3498653758926)
+'''

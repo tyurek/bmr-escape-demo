@@ -1,81 +1,5 @@
-# Build and import mimc
-sfix.set_precision(16, 64)
-
-a = sint(1239234)
-b = sint(2823239)
-
-def test(actual, expected):
-
-    # you can reveal a number in order to print it
-
-    actual = actual.reveal()
-    print_ln('expected %s, got %s', expected, actual)
-
-
-"""
-test(a < b, 1)
-
-key = sint.get_random_triple()[0]
-
-prf = MiMC(64, key, 2)
-b0 = prf.encrypt(0)
-b1 = prf.encrypt(1)
-
-print_ln('b0: %s', b0.reveal())
-print_ln('b1: %s', b1.reveal())
-"""
-
 def cond(bit_selector, val0, val1):
     return (1-bit_selector)*val0 + (bit_selector)*val1
-
-@vectorize
-def dual_encrypt(k1, k2, m):
-    # Returns a pair of field elements as the ciphertext
-    c0 = mimc_prf(k1, 0) + mimc_prf(k2, 0)
-    c1 = mimc_prf(k1, 1) + mimc_prf(k2, 1) + m
-    return (c0, c1)
-'''
-def dual_decrypt(k1, k2, c0, c1):
-    new_c0 = mimc_prf(k1, 0) + mimc_prf(k2, 0)
-    new_c1 = mimc_prf(k1, 1) + mimc_prf(k2, 1)
-    return (c0 == new_c0, c1 - new_c1)
-
-def decrypt_gate(ciphs, label0, label1):
-    out = cint(0)
-    for ciph in (ciphs[0:2], ciphs[2:4], ciphs[4:6], ciphs[6:8]):
-        #todo: find a way to abort if none of the decryptions are good
-        res = dual_decrypt(label0, label1, ciph[0], ciph[1])
-        out += res[0] * res[1]
-    return out
-'''
-
-'''
-@vectorize
-def mimc_prf(key, m):
-    x = MemValue(m + key)
-
-    for r in range(64):
-    # for some reason, this opt would greatly increase round total (as does using a MemValue)
-    #@for_range(64)
-    #def _(i):
-        x.write(x** 3)
-        x.write(x + key + 0) # self.constants[r]
-
-    #x = x + key
-    x.write(x+key)
-    return x.read()
-'''
-
-@vectorize
-def mimc_prf(key, m):
-    x = m + key
-
-    for r in range(64):
-        x = x ** 3
-        x = x + key + 0 # self.constants[r]
-
-    x = x + key
-    return x
 
 @vectorize
 def XOR(a,b):
@@ -92,163 +16,10 @@ def COND(s,ifa,ifb,a=0,b=1):
            (s-a)/(b-a) * ifb
 
 
-def step1_garble_generator(circuit):
-    """
-    For each wire:
-    1. Sample a random wire mask bit
-    2. Sample a wire label
-
-    For each gate g with input wires a,b and output wire c
-       Enc()
-
-    """
-    labels0 = sint.Array(circuit.n_wires)
-    labels1 = sint.Array(circuit.n_wires)
-    maskbit = sint.Array(circuit.n_wires)
-    
-    is_inv = set()
-    inv_gates = []
-    and_gates = []
-    xor_gates = []
-    for g in circuit.gates:
-        if g[0] == 'INV':
-            is_inv.add(g[2])
-            inv_gates.append(g)
-        if g[0] == 'XOR':
-            xor_gates.append(g)
-        if g[0] == 'AND':
-            and_gates.append(g)
-
-    @for_range_opt(circuit.n_wires)
-    def _preplabels(w):
-        labels0[w] = sint.get_random()
-        labels1[w] = sint.get_random()
-        maskbit[w] = sint.get_random_bit()
-
-    inv_gates_src = regint.Array(len(inv_gates))
-    inv_gates_dst = regint.Array(len(inv_gates))
-    inv_gates_src[:] = [g[1] for g in inv_gates]
-    inv_gates_dst[:] = [g[2] for g in inv_gates]
-    @for_range_opt(len(inv_gates))
-    def _inv(i):
-        # For inv, copy the labels but flip the semantic bit
-        inp = inv_gates_src[i]
-        out = inv_gates_dst[i] #it's me. I'm the issue
-        labels0[out] = labels0[inp]
-        labels1[out] = labels1[inp]
-        maskbit[out] = 1 - maskbit[inp]
-    
-    def prep_gates_vec(op, gates):
-        #print_ln('gates is %s.', gates.reveal())
-        gates = gates.transpose()
-        #print_ln('gates_transpose is %s.', gates.reveal())
-        #tom: chaned this to cint, since these are revealed values
-        ciph = cint.Matrix(8, len(gates[0]))
-        a = gates[0]
-        b = gates[1]
-        c = gates[2]
-
-        print_ln('line 121')
-        #print_ln('a is %s.', a.reveal())
-        #print_ln('b is %s.', b.reveal())
-        #print_ln('labels0.get(a) is %s.', labels0.get(a).reveal())
-        
-        z00 = XOR( op( XOR(0,maskbit.get(a)), XOR(0, maskbit.get(b)) ), maskbit.get(c))
-        z01 = XOR( op( XOR(0,maskbit.get(a)), XOR(1, maskbit.get(b)) ), maskbit.get(c))
-        z10 = XOR( op( XOR(1,maskbit.get(a)), XOR(0, maskbit.get(b)) ), maskbit.get(c))
-        z11 = XOR( op( XOR(1,maskbit.get(a)), XOR(1, maskbit.get(b)) ), maskbit.get(c))
-        c00a,c00b = dual_encrypt(labels0.get(a), labels0.get(b), cond(z00, labels0.get(c), labels1.get(c)))
-        c01a,c01b = dual_encrypt(labels0.get(a), labels1.get(b), cond(z01, labels0.get(c), labels1.get(c)))
-        c10a,c10b = dual_encrypt(labels1.get(a), labels0.get(b), cond(z10, labels0.get(c), labels1.get(c)))
-        c11a,c11b = dual_encrypt(labels1.get(a), labels1.get(b), cond(z11, labels0.get(c), labels1.get(c)))
-        
-        print('c00a', len(c00a))
-        #print('c00a[0]', len(c00a[0]))
-        #print('c00a[0][0]', len(c00a[0][0]))
-        #c00a is an array, just a bad one
-        ciph[0][:] = c00a.reveal()
-        ciph[1][:] = c00b.reveal()
-        ciph[2][:] = c01a.reveal()
-        ciph[3][:] = c01b.reveal()
-        ciph[4][:] = c10a.reveal()
-        ciph[5][:] = c10b.reveal()
-        ciph[6][:] = c11a.reveal()
-        ciph[7][:] = c11b.reveal()
-        
-        #print_ln('c00a[0] is %s.', c00a[0].reveal())
-        #ciph[0].print_reveal_nested()
-        #ciph[1].print_reveal_nested()
-        #ciph[2].print_reveal_nested()
-
-        return ciph
-
-    #print_ln('line 141')
-    print('xor start', len(xor_gates))
-    #print_ln('xor_gates[0] is %s.', xor_gates[0])
-    new_xor_gates = regint.Matrix(len(xor_gates), 3)
-    for i,g in enumerate(xor_gates):
-        new_xor_gates[i][:] = g[1:]
-    xor_ciph = prep_gates_vec(XOR, new_xor_gates)
-    print('xor done')
-
-    print('and start', len(and_gates))
-    new_and_gates = regint.Matrix(len(and_gates), 3)
-    for i,g in enumerate(and_gates):
-        new_and_gates[i][:] = g[1:]
-    and_ciph = prep_gates_vec(AND, new_and_gates)
-    print('and done')
-    #print_ln(and_ciph[0].to_string())
-
-    return circuit, and_ciph, xor_ciph, labels0, labels1, maskbit
-
-'''
-def step2_local_eval(circuit, and_ciph, xor_ciph, input_labels):
-    label_dict = {}
-    for i, label in enumerate(input_labels):
-        label_dict[i] = label
-    #and_count, xor_count = MemValue(0), MemValue(0)
-    #and_count, xor_count = MemValue(cint(0)), MemValue(cint(0))
-    #and_count = MemValue(0)
-    #xor_count = MemValue(0)
-    and_count, xor_count = 0,0
-    for gate in circuit.gates:
-        print("and ", and_count, " xor ", xor_count, "type ", gate[0])
-        inp0 = label_dict[gate[1]]
-        inp1 = label_dict[gate[2]]
-        out_idx = gate[3]
-        if gate[0] == "AND":
-            #res = decrypt_gate([and_ciph[0][and_count.read()], and_ciph[1][and_count.read()], and_ciph[2][and_count.read()], and_ciph[3][and_count.read()], and_ciph[4][and_count.read()], and_ciph[5][and_count.read()], and_ciph[6][and_count.read()], and_ciph[7][and_count.read()]], inp0, inp1)
-            res = decrypt_gate([and_ciph[0][and_count], and_ciph[1][and_count], and_ciph[2][and_count], and_ciph[3][and_count], and_ciph[4][and_count], and_ciph[5][and_count], and_ciph[6][and_count], and_ciph[7][and_count]], inp0, inp1)
-            and_count += 1
-        if gate[0] == "XOR":
-            #res = decrypt_gate([xor_ciph[0][xor_count.read()], xor_ciph[1][xor_count.read()], xor_ciph[2][xor_count.read()], xor_ciph[3][xor_count.read()], xor_ciph[4][xor_count.read()], xor_ciph[5][xor_count.read()], xor_ciph[6][xor_count.read()], xor_ciph[7][xor_count.read()]], inp0, inp1)
-            res = decrypt_gate([xor_ciph[0][xor_count], xor_ciph[1][xor_count], xor_ciph[2][xor_count], xor_ciph[3][xor_count], xor_ciph[4][xor_count], xor_ciph[5][xor_count], xor_ciph[6][xor_count], xor_ciph[7][xor_count]], inp0, inp1)
-            xor_count += 1
-        label_dict[out_idx] = res
-    out_labels = []
-    start = circuit.n_wires - len(circuit.n_output_wires)
-    #for i in range(len(circuit.n_output_wires)):
-    #    out_labels.append(label_dict[i+start])
-    #return out_labels
-'''        
-
 from circuit_forbmr import Circuit
 import itertools
-sb128 = sbits.get_type(128)
-if 0:
-    key = sb128(0x2b7e151628aed2a6abf7158809cf4f3c)
-    plaintext = sb128(0x6bc1bee22e409f96e93d7e117393172a)
-    aes128 = Circuit('aes_128')
-    aes128.compile()
 
-    step1_garble_generator(aes128)
-if 0:
-    mult64 = Circuit('mult64')
-    mult64.compile()
-
-    step1_garble_generator(mult64)
-
-
+@vectorize
 def map_wirelabel_inputs(inpwires, inp_sints, labels0, labels1, maskbit):
     # For each input wire w, retrieve either label0[w] or label1[w], 
     #  depending on inp_sint (and after correcting for maskbit).
@@ -259,20 +30,9 @@ def map_wirelabel_inputs(inpwires, inp_sints, labels0, labels1, maskbit):
     def _loop(i):
         w = inpwires[i]
         inp_labels[i] = COND(XOR(inp_sints[i], maskbit[w]), labels0[w], labels1[w])
+    #inp_labels = [COND(XOR(inp_sints[i], maskbit[inpwires[i]]), labels0[inpwires[i]], labels1[inpwires[i]]) for i in range(len(inpwires))]
     return inp_labels.reveal()
-
-def map_wirelabel_outputs(outwires, out_labels, labels0, labels1, maskbit):
-    # For each input wire w, retrieve either label0[w] or label1[w], 
-    #  depending on inp_sint (and after correcting for maskbit)
-    assert len(outwires) == len(out_labels)
-    out_values = sint.Array(len(outwires))
-    _outwires = cint.Array(len(outwires))
-    _outwires[:] = outwires
-    @for_range_opt(len(outwires))
-    def _loop(i):
-        w = _outwires[i]
-        out_values[i] = COND(out_labels[i], 0, 1, a=labels0[w], b=labels1[w])
-    return out_values.reveal()
+    #return inp_labels
 
 try:
     circuit = Circuit('program')
@@ -289,10 +49,11 @@ if 1:
     p0_num_inputs = 2
     p1_num_inputs = 4
 
+    '''
     # bit_decompose defaults to 64 bits (which we assume all inputs are)
     bitsize = sum(circuit.n_input_wires) // circuit.n_inputs
-    print(bitsize)
-    print(circuit.n_inputs)
+    #print(bitsize)
+    #print(circuit.n_inputs)
     inp_sints_0_int = sint.get_input_from(0, size=p0_num_inputs)
     inp_sints_0_bits = [inp_sints_0_int[i].bit_decompose() for i in range(p0_num_inputs)]
     inp_sints_0_all_bits = [inp_sints_0_bits[i//bitsize][i%bitsize] for i in range(p0_num_inputs*bitsize)]
@@ -303,9 +64,17 @@ if 1:
     #print("len(inp_sints_0):", len(inp_sints_0))
     #print("len(inp_sints_1):", len(inp_sints_1))
     
-    inp_sints = Array.create_from([i for i in inp_sints_0_all_bits] + [i for i in inp_sints_1_all_bits])
+    #inp_sints = [i for i in inp_sints_0_all_bits] + [i for i in inp_sints_1_all_bits]
+    #inp_sints = Array.create_from([i for i in inp_sints_0_all_bits] + [i for i in inp_sints_1_all_bits])
+    
+    inp_sints = sint.Array(sum(circuit.n_input_wires))
+    inp_sints[0:128] = inp_sints_0_all_bits
+    inp_sints[128:] = inp_sints_1_all_bits
+
+
 
     num_labels = circuit.n_wires
+    print("num_labels", num_labels)
     code1, labels0 = sint.read_from_file(regint(0), num_labels)
     code2, labels1 = sint.read_from_file(regint(num_labels), num_labels)
     code3, maskbit = sint.read_from_file(regint(num_labels+num_labels), num_labels)
@@ -317,8 +86,12 @@ if 1:
 
     inpwires = cint.Array(sum(circuit.n_input_wires))
     inpwires[:] = range(sum(circuit.n_input_wires))
+    inpwires = cint.Array(64)
+    inpwires[:] = range(64)
     inp_labels = map_wirelabel_inputs(inpwires, inp_sints, labels0, labels1, maskbit)
     print_ln('inp_labels')
     inp_labels.print_reveal_nested()
-    #print_ln('inp_sints_0: %s', inp_sints_0.reveal())
-    #print_ln('inp_sints: %s', inp_sints.reveal())
+    #print_ln("%s", [label.reveal() for label in inp_labels[1:5]])
+    #f = Array.create_from(inp_labels)
+    #f.print_reveal_nested()
+
